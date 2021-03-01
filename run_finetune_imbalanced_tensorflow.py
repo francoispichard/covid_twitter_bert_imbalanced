@@ -381,7 +381,7 @@ def parse_args():
     # Parse commandline
     parser = ArgParseDefault()
     parser.add_argument('--finetune_data', required=True, help='Finetune data folder sub path. Path has to be in gs://{bucket_name}/{project_name}/finetune/finetune_data/{finetune_data}.\
-                    This folder includes a meta.json (containing meta info about the dataset), a tr_set_imbalanced_classes_frequency.json (dictionary with class labels as keys and class weights (cf. get_loss_fn function of the current script) as values, and a file label_mapping.json. \
+                    This folder includes a meta.json (containing meta info about the dataset), a imbalanced_classes_frequency.json (dictionary with class labels as keys and class weights (cf. get_loss_fn function of the current script) as values, and a file label_mapping.json. \
                     TFrecord files (train.tfrecords and dev.tfrecords) should be located in a \
                     subfolder gs://{bucket_name}/{project_name}/finetune/finetune_data/{finetune_data}/tfrecords/')
     parser.add_argument('--bucket_name', required=True, help='Bucket name')
