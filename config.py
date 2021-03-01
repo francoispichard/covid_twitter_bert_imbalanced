@@ -35,5 +35,12 @@ PRETRAINED_MODELS = {
             'vocab_file': 'bert-large-uncased-whole-word-masking-vocab.txt',
             'lower_case': True,
             'do_whole_word_masking': True
-            }
+            },
+        'bert_small_uncased': {
+            'hub_url': 'small_bert/bert_en_uncased_L-4_H-512_A-8/1',
+            'config': 'bert_config_small_uncased.json',
+            'is_tfhub_model': True,
+            'vocab_file': 'bert-small-uncased-vocab.txt',
+            'lower_case': True,
+            'do_whole_word_masking': False}
         }
