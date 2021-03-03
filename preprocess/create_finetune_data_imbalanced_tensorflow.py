@@ -6,6 +6,7 @@ import logging
 import sys
 import json
 import glob
+from collections import Counter
 import tensorflow as tf
 sys.path.append('../tensorflow_models')
 sys.path.append('..')
