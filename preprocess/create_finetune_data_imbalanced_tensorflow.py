@@ -158,7 +158,7 @@ def main(args):
             # Frequency count of labels (assessment after reading all the data (training and developement set) -> assessment occurs at the second step of the for loop (i.e., when _type = 'dev') 
             if _type == 'dev':
                 # Number of entries per label in train_set + dev_set (the dictionary structure corresponds to {key:value} ->{label:count})
-                dict_count_per_label = Counter(np.array(tr_dev_labels))
+                dict_count_per_label = dict(Counter(np.array(tr_dev_labels)))
                 # Sort the labels alphabetically (sorted_labels is a list)
                 sorted_labels = sorted(dict_count_per_label.keys())
                 # List of values whose order is parallel to sorted_labels
