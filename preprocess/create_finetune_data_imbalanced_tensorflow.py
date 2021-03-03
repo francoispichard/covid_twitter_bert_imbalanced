@@ -1,7 +1,6 @@
 """Script which loads multiple datasets and prepares them for finetuning"""
 import pandas as pd
 import numpy as np
-import numpy as np
 import os
 import datetime
 import logging
@@ -154,7 +153,7 @@ def main(args):
             # Update the set of *unique* labels in the current DataFrame (training set or development set)
             unique_labels.update(df.label.unique().tolist())
             # Copy the *full* list of labels in the current DataFrame (training set or development set)
-            tr_dev_labels.append(df.label.tolist())
+            tr_dev_labels.append += df.label.tolist()
             # Frequency count of labels (assessment after reading all the data (training and developement set) -> assessment occurs at the second step of the for loop (i.e., when _type = 'dev') 
             if _type == 'dev':
                 # Number of entries per label in train_set + dev_set (the dictionary structure corresponds to {key:value} ->{label:count})
