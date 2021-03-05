@@ -1,7 +1,7 @@
 import sys
 # import from official repo
 sys.path.append('tensorflow_models')
-import bert_models_modified
+import small_bert_models
 from official.utils.misc import distribution_utils
 from official.nlp.bert import configs as bert_configs
 from official.modeling import performance
@@ -65,7 +65,7 @@ def get_model(args, model_config, steps_per_epoch, warmup_steps, num_labels, max
     else:
         hub_module_url = None
         hub_module_trainable = False
-    classifier_model, core_model = bert_models_modified.classifier_model(
+    classifier_model, core_model = small_bert_models.classifier_model(
             model_config,
             num_labels,
             max_seq_length,
