@@ -136,9 +136,13 @@ def get_label_mapping(data_dir):
 
 def get_class_weights(data_dir):
     with tf.io.gfile.GFile(os.path.join(data_dir, 'imbalanced_classes_frequency.json'), 'rb') as reader:
-        class_weights = json.loads(reader.read().decode('utf-8'))
+        class_frequencies = json.loads(reader.read().decode('utf-8'))
     # Turn class_weights into a list
-    class_weights = list(class_weights.values())
+    class_frequencies = list(class_frequencies.values())
+    class_weights = []
+    for f in class_frequencies:
+        weight = 1/f
+        class_weights.append(weight)
     return class_weights
 
 def get_metrics():
