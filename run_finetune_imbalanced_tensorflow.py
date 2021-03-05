@@ -139,9 +139,10 @@ def get_class_weights(data_dir):
         class_frequencies = json.loads(reader.read().decode('utf-8'))
     # Turn class_weights into a list
     class_frequencies = list(class_frequencies.values())
+    total = len(class_frequencies)
     class_weights = []
     for f in class_frequencies:
-        weight = 1/f
+        weight = ((1/f)**2)/total
         class_weights.append(weight)
     return class_weights
 
