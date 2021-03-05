@@ -1,7 +1,7 @@
 import sys
 # import from official repo
 sys.path.append('tensorflow_models')
-from official.nlp.bert import bert_models
+import bert_models_modified
 from official.utils.misc import distribution_utils
 from official.nlp.bert import configs as bert_configs
 from official.modeling import performance
@@ -65,7 +65,7 @@ def get_model(args, model_config, steps_per_epoch, warmup_steps, num_labels, max
     else:
         hub_module_url = None
         hub_module_trainable = False
-    classifier_model, core_model = bert_models.classifier_model(
+    classifier_model, core_model = bert_models_modified.classifier_model(
             model_config,
             num_labels,
             max_seq_length,
@@ -113,15 +113,14 @@ def get_loss_fn(num_classes, class_weights):
         # log_probs is a 2D tensor (each row corresponds to a sentence)
         log_probs = tf.nn.log_softmax(logits, axis=-1)
         # Size of the minibatch
-        minibatch_size = int(tf.shape(log_probs)[0])
-        
-        # Obtain Wclass (2D tensor) by reshaping class_weights (1D tensor)
-        Wclass = tf.reshape(tf.constant(class_weights * minibatch_size, dtype=tf.float32), [len(class_weights), minibatch_size]) # Wclass is a 2D tensor that represents a "broadcasting" of class_weights
-        
+        minibatch_size = logits.shape[0]
+
         # remaining_weights is a 1D tensor with length minibatch_size and is obtained by filtering the relevant class weight for each entry in the minibatch (elementwise multiplication between one_hot_labels and Wclass, both of them being 2D tensors) 
-        remaining_weights = tf.reduce_sum(tf.cast(one_hot_labels, dtype=tf.float32) * Wclass, axis=-1)
-        
-        # Elementwise multiplication between remaining_weights (1D, length = size of minibatch) and the second term (1D tensor, length = size of minibatch)
+        remaining_weights = tf.reduce_sum(tf.cast(one_hot_labels, dtype=tf.float32) * class_weights, axis=-1)
+       
+        # Below: one_hot_labels * log_probs is a 2D tensor; the reduce_sum operation along the second dimension yields a 1D tensor (length = size of minibatch)
+
+        # Elementwise multiplication between two 1D tensors; each element corresponds to the cross-entropy loss of a particular example 
         per_example_loss = - remaining_weights * (tf.reduce_sum(tf.cast(one_hot_labels, dtype=tf.float32) * log_probs, axis=-1))
         # weights_sum is a scalar that corresponds to the sum of the class weights for each entry in the minibatch
         weights_sum = tf.reduce_sum(remaining_weights, axis=-1)
