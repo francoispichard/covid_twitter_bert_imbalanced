@@ -114,7 +114,6 @@ def get_loss_fn(num_classes, class_weights):
         log_probs = tf.nn.log_softmax(logits, axis=-1)
         # Size of the minibatch
         minibatch_size = logits.shape[0]
-
         # remaining_weights is a 1D tensor with length minibatch_size and is obtained by filtering the relevant class weight for each entry in the minibatch (elementwise multiplication between one_hot_labels and Wclass, both of them being 2D tensors) 
         remaining_weights = tf.reduce_sum(tf.cast(one_hot_labels, dtype=tf.float32) * class_weights, axis=-1)
        
