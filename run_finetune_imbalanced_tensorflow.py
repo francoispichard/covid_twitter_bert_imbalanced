@@ -266,7 +266,7 @@ def run(args):
         args.eval_batch_size,
         is_training=False)
 
-    # Add mertrics callback to calculate performance metrics at the end of epoch
+    # Add metrics callback to calculate performance metrics at the end of epoch
     performance_metrics_callback = Metrics(
             eval_input_fn,
             label_mapping,
