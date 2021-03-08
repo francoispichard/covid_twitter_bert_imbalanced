@@ -311,7 +311,7 @@ def classifier_model(bert_config,
 
   # pooled_output corresponds to the representation of the [CLS] token from the top-most layer, and feeding that through another dense layer. It's pooling in the sense that it's extracting a representation for the whole sequence. 
   pooled_output = bert_model({'input_word_ids': input_word_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids})['pooled_output']     
-  # Positional arguments of bert_model should be passed as the above command if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' 
+  # Positional arguments of bert_model should be passed inside a dictionary if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' (see Section "Advanced Topics" at https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1) 
   # As a reminder, the three positional arguments ('input_word_'ids', 'input_mask', 'input_type_ids') should be passed within a list if the following models (defined in config.py) are used: 'tensorflow/bert_en_uncased_L-24_H-1024-A_16/2', 'tensorflow/bert_multi_cased_L-12_H-768-A-12/2', 'tensorflow/bert_en_wwm_uncased_L-24_H-1024_A-16/2', 'digitalepidemiologylab/covid-twitter-bert/1'
   
   output = tf.keras.layers.Dropout(rate=bert_config.hidden_dropout_prob)(pooled_output)
