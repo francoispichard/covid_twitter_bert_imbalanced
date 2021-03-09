@@ -1,28 +1,33 @@
+import tensorflow as tf
+import tensorflow_datasets as tfds
+
 import sys
 # import from official repo
 sys.path.append('tensorflow_models')
-import small_bert_models
 from official.utils.misc import distribution_utils
-from official.nlp.bert import configs as bert_configs
 from official.modeling import performance
-from official.nlp.bert import input_pipeline
+# from official.nlp.bert import input_pipeline
 from official.utils.misc import keras_utils
+from official.nlp.bert import configs as bert_configs
+from config import PRETRAINED_MODELS
+
+import small_bert_models
+import input_pipeline_modified
 
 import os
 import datetime
 import time
 import argparse
 import math
-import logging
-from logging.handlers import RotatingFileHandler
 import tqdm
 import json
-import tensorflow as tf
+
 from utils.misc import ArgParseDefault, save_to_json, add_bool_arg
 from utils.finetune_helpers import Metrics
 import utils.optimizer
-from config import PRETRAINED_MODELS
 
+import logging
+from logging.handlers import RotatingFileHandler
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)-5.5s] [%(name)-12.12s]: %(message)s')
 logger = logging.getLogger(__name__)
@@ -56,49 +61,38 @@ def configure_optimizer(optimizer, use_float16=False, use_graph_rewrite=False, l
         optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer)
     return optimizer
 
-def get_model(args, model_config, steps_per_epoch, warmup_steps, num_labels, max_seq_length, is_hub_module=False):
-    # Get classifier and core model (used to initialize from checkpoint)
-    if args.init_checkpoint is None and PRETRAINED_MODELS[args.model_class]['is_tfhub_model']:
-        # load pretrained model from TF-hub
-        hub_module_url = f"https://tfhub.dev/{PRETRAINED_MODELS[args.model_class]['hub_url']}"
-        hub_module_trainable = True
-    else:
-        hub_module_url = None
-        hub_module_trainable = False
-    classifier_model, core_model = small_bert_models.classifier_model(
-            model_config,
-            num_labels,
-            max_seq_length,
-            hub_module_url=hub_module_url,
-            hub_module_trainable=hub_module_trainable)
-    # Optimizer
-    optimizer = utils.optimizer.create_optimizer(
-            args.learning_rate,
-            steps_per_epoch * args.num_epochs,
-            warmup_steps,
-            args.end_lr,
-            args.optimizer_type)
-    classifier_model.optimizer = configure_optimizer(
-            optimizer,
-            use_float16=False,
-            use_graph_rewrite=False)
-    return classifier_model, core_model
+def get_hub_model(model_class, max_seq_length):
+    # Load pretrained model from TF-Hub
+    hub_module_url = f"https://tfhub.dev/{PRETRAINED_MODELS[model_class]['hub_url']}"
 
-def get_dataset_fn(input_file_pattern, max_seq_length, global_batch_size, is_training=True):
-  """Gets a closure to create a dataset."""
-  def _dataset_fn(ctx=None):
-    """Returns tf.data.Dataset for distributed BERT pretraining."""
-    batch_size = ctx.get_per_replica_batch_size(
-        global_batch_size) if ctx else global_batch_size
-    dataset = input_pipeline.create_classifier_dataset(
-        input_file_pattern,
-        max_seq_length,
-        batch_size,
-        is_training=is_training,
-        input_pipeline_context=ctx)
-    return dataset
+    encoder = hub.KerasLayer(hub_module_url, trainable=False)
+  
+    # Encoder inputs: the SavedModel associated with BERT-Small expects a dict with three int32 Tensors as input: input_word_ids, input_mask, and input_type_ids
+    # Positional arguments of bert_model should be passed inside a dictionary if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' (see Section "Advanced Topics" at https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1) 
+    input_word_ids = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
+    input_mask = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
+    input_type_ids = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
+  
+    encoder_inputs = {'input_word_ids': input_word_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids}
+    # pooled_output corresponds to the representation of the [CLS] token from the top-most layer. It's pooling in the sense that it's extracting a representation for the whole sequence. 
+    pooled_output = encoder(encoder_inputs)['pooled_output']
+    return tf.keras.Model(inputs=encoder_inputs, outputs=pooled_output) 
 
-  return _dataset_fn
+# def get_dataset_fn(input_file_pattern, max_seq_length, global_batch_size, is_training=True):
+#   """Gets a closure to create a dataset."""
+#   def _dataset_fn(ctx=None):
+#     """Returns tf.data.Dataset for distributed BERT pretraining."""
+#     batch_size = ctx.get_per_replica_batch_size(
+#         global_batch_size) if ctx else global_batch_size
+#     dataset = input_pipeline.create_classifier_dataset(
+#         input_file_pattern,
+#         max_seq_length,
+#         batch_size,
+#         is_training=is_training,
+#         input_pipeline_context=ctx)
+#     return dataset
+  #
+  # return _dataset_fn
 
 def get_loss_fn(num_classes, class_weights):
     # class_weights should be a *list* of length num_classes  
@@ -142,7 +136,7 @@ def get_class_weights(data_dir):
     total = len(class_frequencies)
     class_weights = []
     for f in class_frequencies:
-        weight = ((1/f)**2)/total
+        weight = (1/f)/total
         class_weights.append(weight)
     return class_weights
 
@@ -184,6 +178,8 @@ def run(args):
     
     # Weights reflecting class imbalance; class_weights is a list
     class_weights = get_class_weights(data_dir)
+    logger.info(f'Loaded class frequencies (training + development set together)')
+
     # Calculate steps, warmup steps and eval steps
     train_data_size = input_meta_data['train_data_size']
     num_labels = input_meta_data['num_labels']
@@ -198,7 +194,7 @@ def run(args):
     else:
         eval_steps = args.limit_eval_steps
 
-    # some logging
+    # Some logging
     if args.init_checkpoint is None:
         logger.info(f'Finetuning on dataset {args.finetune_data} using default pretrained model {args.model_class}')
     else:
@@ -207,139 +203,143 @@ def run(args):
     logger.info(f'Using warmup proportion of {args.warmup_proportion}, resulting in {warmup_steps:,} warmup steps')
     logger.info(f'Using learning rate: {args.learning_rate}, training batch size: {args.train_batch_size}, num_epochs: {args.num_epochs}')
 
-    # Get model
-    classifier_model, core_model = get_model(args, model_config, steps_per_epoch, warmup_steps, num_labels, max_seq_length)
-    optimizer = classifier_model.optimizer
-    loss_fn = get_loss_fn(num_labels, class_weights)
-    try:
-        if ',' in args.validation_freq:
-            validation_freq = args.validation_freq.split(',')
-            validation_freq = [int(v) for v in validation_freq]
-        else:
-            validation_freq = int(args.validation_freq)
-    except:
-        raise ValueError(f'Invalid argument for validation_freq!')
-    logger.info(f'Using a validation frequency of {validation_freq}')
+    # Load tokenizer
+    logger.info(f'Loading tokenizer...')
+    tokenizer = get_tokenizer(args.model_class)
 
-    # Restore checkpoint
-    if args.init_checkpoint:
-        checkpoint_path = f'gs://{args.bucket_name}/{args.project_name}/pretrain/runs/{args.init_checkpoint}'
-        checkpoint = tf.train.Checkpoint(model=core_model)
-        checkpoint.restore(checkpoint_path).assert_existing_objects_matched()
-        logger.info(f'Successfully restored checkpoint from {checkpoint_path}')
+    # Load model
+    logger.info(f'Loading model...')
+    model = get_hub_model(args.model_class, max_seq_length)
+    
+    tr_encoder_input_dict = input_pipeline_modified.get_encoder_input_dict((os.path.join(data_dir, 'tfrecords', 'train.tfrecords')
+    dev_encoder_input_dict = input_pipeline_modified.get_encoder_input_dict(os.path.join(data_dir, 'tfrecords', 'dev.tfrecords')
 
-    # Run keras compile
-    logger.info(f'Compiling keras model...')
-    classifier_model.compile(
-        optimizer=optimizer,
-        loss=loss_fn,
-        metrics=get_metrics())
-    logger.info(f'... done')
+    train_output_embeddings = model(tr_encoder_input_dict)
+    dev_output_embeddings = model(dev_encoder_input_dict)
 
-    # Create all custom callbacks
-    summary_dir = os.path.join(output_dir, 'summaries')
-    summary_callback = tf.keras.callbacks.TensorBoard(summary_dir, profile_batch=0)
-    time_history_callback = keras_utils.TimeHistory(
-        batch_size=args.train_batch_size,
-        log_steps=args.time_history_log_steps,
-        logdir=summary_dir)
-    custom_callbacks = [summary_callback, time_history_callback]
-    if args.save_model:
-        logger.info('Using save_model option...')
-        checkpoint_path = os.path.join(output_dir, 'checkpoint')
-        checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(checkpoint_path, save_weights_only=True, verbose=1)
-        custom_callbacks.append(checkpoint_callback)
-    if args.early_stopping_epochs > 0:
-        logger.info(f'Using early stopping of after {args.early_stopping_epochs} epochs of val_loss not decreasing')
-        early_stopping_callback = tf.keras.callbacks.EarlyStopping(patience=args.early_stopping_epochs, monitor='val_loss')
-        custom_callbacks.append(early_stopping_callback)
+    pooled_output_train = train_output_embeddings['pooled_output']
 
-    # Generate dataset_fn
-    train_input_fn = get_dataset_fn(
-        os.path.join(data_dir, 'tfrecords', 'train.tfrecords'),
-        max_seq_length,
-        args.train_batch_size,
-        is_training=True)
-    eval_input_fn = get_dataset_fn(
-        os.path.join(data_dir, 'tfrecords', 'dev.tfrecords'),
-        max_seq_length,
-        args.eval_batch_size,
-        is_training=False)
-
-    # Add metrics callback to calculate performance metrics at the end of epoch
-    performance_metrics_callback = Metrics(
-            eval_input_fn,
-            label_mapping,
-            os.path.join(summary_dir, 'metrics'),
-            eval_steps,
-            args.eval_batch_size,
-            validation_freq)
-    custom_callbacks.append(performance_metrics_callback)
-
-    # Run keras fit
-    time_start = time.time()
-    logger.info('Run training...')
-    history = classifier_model.fit(
-        x=train_input_fn(),
-        validation_data=eval_input_fn(),
-        steps_per_epoch=steps_per_epoch,
-        epochs=args.num_epochs,
-        validation_steps=eval_steps,
-        validation_freq=validation_freq,
-        callbacks=custom_callbacks,
-        verbose=1)
-    time_end = time.time()
-    training_time_min = (time_end-time_start)/60
-    logger.info(f'Finished training after {training_time_min:.1f} min')
-
-    # Write training log
-    all_scores = performance_metrics_callback.scores
-    all_predictions = performance_metrics_callback.predictions
-    if len(all_scores) > 0:
-        final_scores = all_scores[-1]
-        logger.info(f'Final eval scores: {final_scores}')
-    else:
-        final_scores = {}
-    full_history = history.history
-    if len(full_history) > 0:
-        final_val_loss = full_history['val_loss'][-1]
-        final_loss = full_history['loss'][-1]
-        logger.info(f'Final training loss: {final_loss:.2f}, Final validation loss: {final_val_loss:.2f}')
-    else:
-        final_val_loss = None
-        final_loss = None
-    data = {
-            'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'run_name': run_name,
-            'final_loss': final_loss,
-            'final_val_loss': final_val_loss,
-            'max_seq_length': max_seq_length,
-            'num_train_steps': steps_per_epoch * args.num_epochs,
-            'eval_steps': eval_steps,
-            'steps_per_epoch': steps_per_epoch,
-            'training_time_min': training_time_min,
-            'data_dir': data_dir,
-            'output_dir': output_dir,
-            'all_scores': all_scores,
-            'all_predictions': all_predictions,
-            'num_labels': num_labels,
-            'label_mapping': label_mapping,
-            **full_history,
-            **final_scores,
-            **vars(args),
-            }
-    # Write run_log
-    f_path_training_log = os.path.join(output_dir, 'run_logs.json')
-    logger.info(f'Writing training log to {f_path_training_log}...')
-    save_to_json(data, f_path_training_log)
-    # Write bert config
-    model_config.id2label = label_mapping
-    model_config.label2id = {v:k for k, v in label_mapping.items()}
-    model_config.max_seq_length = max_seq_length
-    model_config.num_labels = num_labels
-    f_path_bert_config = os.path.join(output_dir, 'bert_config.json')
-    logger.info(f'Writing BERT config to {f_path_bert_config}...')
-    save_to_json(model_config.to_dict(), f_path_bert_config)
+    # optimizer = classifier_model.optimizer
+    # loss_fn = get_loss_fn(num_labels, class_weights)
+    
+    # try:
+    #     if ',' in args.validation_freq:
+    #         validation_freq = args.validation_freq.split(',')
+    #         validation_freq = [int(v) for v in validation_freq]
+    #     else:
+    #         validation_freq = int(args.validation_freq)
+    # except:
+    #     raise ValueError(f'Invalid argument for validation_freq!')
+    # logger.info(f'Using a validation frequency of {validation_freq}')
+    #
+    # # Restore checkpoint
+    # if args.init_checkpoint:
+    #     checkpoint_path = f'gs://{args.bucket_name}/{args.project_name}/pretrain/runs/{args.init_checkpoint}'
+    #     checkpoint = tf.train.Checkpoint(model=core_model)
+    #     checkpoint.restore(checkpoint_path).assert_existing_objects_matched()
+    #     logger.info(f'Successfully restored checkpoint from {checkpoint_path}')
+    #
+    # # Run keras compile
+    # logger.info(f'Compiling keras model...')
+    # classifier_model.compile(
+    #     optimizer=optimizer,
+    #     loss=loss_fn,
+    #     metrics=get_metrics())
+    # logger.info(f'... done')
+    #
+    # # Create all custom callbacks
+    # summary_dir = os.path.join(output_dir, 'summaries')
+    # summary_callback = tf.keras.callbacks.TensorBoard(summary_dir, profile_batch=0)
+    # time_history_callback = keras_utils.TimeHistory(
+    #     batch_size=args.train_batch_size,
+    #     log_steps=args.time_history_log_steps,
+    #     logdir=summary_dir)
+    # custom_callbacks = [summary_callback, time_history_callback]
+    # if args.save_model:
+    #     logger.info('Using save_model option...')
+    #     checkpoint_path = os.path.join(output_dir, 'checkpoint')
+    #     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(checkpoint_path, save_weights_only=True, verbose=1)
+    #     custom_callbacks.append(checkpoint_callback)
+    # if args.early_stopping_epochs > 0:
+    #     logger.info(f'Using early stopping of after {args.early_stopping_epochs} epochs of val_loss not decreasing')
+    #     early_stopping_callback = tf.keras.callbacks.EarlyStopping(patience=args.early_stopping_epochs, monitor='val_loss')
+    #     custom_callbacks.append(early_stopping_callback)
+    #
+    #
+    # # Add metrics callback to calculate performance metrics at the end of epoch
+    # performance_metrics_callback = Metrics(
+    #         eval_input_fn,
+    #         label_mapping,
+    #         os.path.join(summary_dir, 'metrics'),
+    #         eval_steps,
+    #         args.eval_batch_size,
+    #         validation_freq)
+    # custom_callbacks.append(performance_metrics_callback)
+    #
+    # # Run keras fit
+    # time_start = time.time()
+    # logger.info('Run training...')
+    # history = classifier_model.fit(
+    #     x=train_input_fn(),
+    #     validation_data=eval_input_fn(),
+    #     steps_per_epoch=steps_per_epoch,
+    #     epochs=args.num_epochs,
+    #     validation_steps=eval_steps,
+    #     validation_freq=validation_freq,
+    #     callbacks=custom_callbacks,
+    #     verbose=1)
+    # time_end = time.time()
+    # training_time_min = (time_end-time_start)/60
+    # logger.info(f'Finished training after {training_time_min:.1f} min')
+    #
+    # # Write training log
+    # all_scores = performance_metrics_callback.scores
+    # all_predictions = performance_metrics_callback.predictions
+    # if len(all_scores) > 0:
+    #     final_scores = all_scores[-1]
+    #     logger.info(f'Final eval scores: {final_scores}')
+    # else:
+    #     final_scores = {}
+    # full_history = history.history
+    # if len(full_history) > 0:
+    #     final_val_loss = full_history['val_loss'][-1]
+    #     final_loss = full_history['loss'][-1]
+    #     logger.info(f'Final training loss: {final_loss:.2f}, Final validation loss: {final_val_loss:.2f}')
+    # else:
+    #     final_val_loss = None
+    #     final_loss = None
+    # data = {
+    #         'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    #         'run_name': run_name,
+    #         'final_loss': final_loss,
+    #         'final_val_loss': final_val_loss,
+    #         'max_seq_length': max_seq_length,
+    #         'num_train_steps': steps_per_epoch * args.num_epochs,
+    #         'eval_steps': eval_steps,
+    #         'steps_per_epoch': steps_per_epoch,
+    #         'training_time_min': training_time_min,
+    #         'data_dir': data_dir,
+    #         'output_dir': output_dir,
+    #         'all_scores': all_scores,
+    #         'all_predictions': all_predictions,
+    #         'num_labels': num_labels,
+    #         'label_mapping': label_mapping,
+    #         **full_history,
+    #         **final_scores,
+    #         **vars(args),
+    #         }
+    # # Write run_log
+    # f_path_training_log = os.path.join(output_dir, 'run_logs.json')
+    # logger.info(f'Writing training log to {f_path_training_log}...')
+    # save_to_json(data, f_path_training_log)
+    # # Write bert config
+    # model_config.id2label = label_mapping
+    # model_config.label2id = {v:k for k, v in label_mapping.items()}
+    # model_config.max_seq_length = max_seq_length
+    # model_config.num_labels = num_labels
+    # f_path_bert_config = os.path.join(output_dir, 'bert_config.json')
+    # logger.info(f'Writing BERT config to {f_path_bert_config}...')
+    # save_to_json(model_config.to_dict(), f_path_bert_config)
 
 def set_mixed_precision_policy(args):
     """Sets mix precision policy."""
