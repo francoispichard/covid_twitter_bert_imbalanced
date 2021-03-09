@@ -61,23 +61,7 @@ def configure_optimizer(optimizer, use_float16=False, use_graph_rewrite=False, l
         optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer)
     return optimizer
 
-def get_hub_model(model_class, max_seq_length):
-    # Load pretrained model from TF-Hub
-    hub_module_url = f"https://tfhub.dev/{PRETRAINED_MODELS[model_class]['hub_url']}"
-
-    encoder = hub.KerasLayer(hub_module_url, trainable=False)
   
-    # Encoder inputs: the SavedModel associated with BERT-Small expects a dict with three int32 Tensors as input: input_word_ids, input_mask, and input_type_ids
-    # Positional arguments of bert_model should be passed inside a dictionary if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' (see Section "Advanced Topics" at https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1) 
-    input_word_ids = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
-    input_mask = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
-    input_type_ids = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
-  
-    encoder_inputs = {'input_word_ids': input_word_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids}
-    # pooled_output corresponds to the representation of the [CLS] token from the top-most layer. It's pooling in the sense that it's extracting a representation for the whole sequence. 
-    pooled_output = encoder(encoder_inputs)['pooled_output']
-    return tf.keras.Model(inputs=encoder_inputs, outputs=pooled_output) 
-
 # def get_dataset_fn(input_file_pattern, max_seq_length, global_batch_size, is_training=True):
 #   """Gets a closure to create a dataset."""
 #   def _dataset_fn(ctx=None):
@@ -207,18 +191,29 @@ def run(args):
     logger.info(f'Loading tokenizer...')
     tokenizer = get_tokenizer(args.model_class)
 
-    # Load model
+    # Load pretrained model from TF-Hub
     logger.info(f'Loading model...')
-    model = get_hub_model(args.model_class, max_seq_length)
     
+    hub_module_url = f"https://tfhub.dev/{PRETRAINED_MODELS[model_class]['hub_url']}"
+
+    encoder = hub.load(hub_module_url)
+  
+    # Encoder inputs: the SavedModel associated with BERT-Small expects a dict with three int32 Tensors as input: input_word_ids, input_mask, and input_type_ids
+    # Positional arguments of bert_model should be passed inside a dictionary if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' (see Section "Advanced Topics" at https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1) 
     tr_encoder_input_dict = input_pipeline_modified.get_encoder_input_dict((os.path.join(data_dir, 'tfrecords', 'train.tfrecords')
     dev_encoder_input_dict = input_pipeline_modified.get_encoder_input_dict(os.path.join(data_dir, 'tfrecords', 'dev.tfrecords')
 
-    train_output_embeddings = model(tr_encoder_input_dict)
-    dev_output_embeddings = model(dev_encoder_input_dict)
+    train_output_embeddings = encoder(tr_encoder_input_dict)
+    dev_output_embeddings = encoder(dev_encoder_input_dict)
 
+    # pooled_output corresponds to the representation of the [CLS] token from the top-most layer. It's pooling in the sense that it's extracting a representation for the whole sequence. 
+    
+    # Train set
     pooled_output_train = train_output_embeddings['pooled_output']
-
+    # pooled_output = encoder(encoder_inputs)['pooled_output'], where encoder_inputs is a dictionary {'input_word_ids': input_word_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids}
+    # Development set
+    pooled_output_dev = dev_output_embeddings['pooled_output']
+    
     # optimizer = classifier_model.optimizer
     # loss_fn = get_loss_fn(num_labels, class_weights)
     
