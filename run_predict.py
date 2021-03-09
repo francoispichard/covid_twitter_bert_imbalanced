@@ -166,7 +166,7 @@ def run(args):
     # restore fine-tuned run
     checkpoint_path = os.path.join(run_dir, 'checkpoint')
     logger.info(f'Restore run checkpoint {checkpoint_path}...')
-    # load weights (expect partial state because we don't want need the optimizer state)
+    # load weights (expect partial state because we don't need the optimizer state)
     try:
         model.load_weights(checkpoint_path).expect_partial()
     except:
