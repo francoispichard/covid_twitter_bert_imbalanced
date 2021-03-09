@@ -303,17 +303,20 @@ def classifier_model(bert_config,
         dropout_rate=bert_config.hidden_dropout_prob,
         initializer=initializer), bert_encoder
 
+  bert_model = hub.KerasLayer(hub_module_url, trainable=hub_module_trainable)
+  
+  # Encoder inputs: the SavedModel associated with BERT-Small expects a dict with three int32 Tensors as input: input_word_ids, input_mask, and input_type_ids
+  # Positional arguments of bert_model should be passed inside a dictionary if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' (see Section "Advanced Topics" at https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1) 
   input_word_ids = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
   input_mask = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
   input_type_ids = tf.keras.layers.Input(shape=(max_seq_length,), dtype=tf.int32)
   
-  bert_model = hub.KerasLayer(hub_module_url, trainable=hub_module_trainable)
 
   # pooled_output corresponds to the representation of the [CLS] token from the top-most layer, and feeding that through another dense layer. It's pooling in the sense that it's extracting a representation for the whole sequence. 
-  pooled_output = bert_model({'input_word_ids': input_word_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids})['pooled_output']     
-  # Positional arguments of bert_model should be passed inside a dictionary if hub_module_url =='tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1' (see Section "Advanced Topics" at https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-4_H-512_A-8/1) 
-  # As a reminder, the three positional arguments ('input_word_'ids', 'input_mask', 'input_type_ids') should be passed within a list if the following models (defined in config.py) are used: 'tensorflow/bert_en_uncased_L-24_H-1024-A_16/2', 'tensorflow/bert_multi_cased_L-12_H-768-A-12/2', 'tensorflow/bert_en_wwm_uncased_L-24_H-1024_A-16/2', 'digitalepidemiologylab/covid-twitter-bert/1'
-  
+  pooled_output = bert_model({'input_word_ids': input_word_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids})['pooled_output'] 
+  # As a reminder, *if* one of the following models (defined in config.py) were to be used: 'tensorflow/bert_en_uncased_L-24_H-1024-A_16/2', 'tensorflow/bert_multi_cased_L-12_H-768-A-12/2', 'tensorflow/bert_en_wwm_uncased_L-24_H-1024_A-16/2', 'digitalepidemiologylab/covid-twitter-bert/1', 
+  # the three positional arguments ('input_word_ids', 'input_mask', 'input_type_ids') should be passed within a *list*   
+
   output = tf.keras.layers.Dropout(rate=bert_config.hidden_dropout_prob)(pooled_output)
 
   output = tf.keras.layers.Dense(num_labels, kernel_initializer=initializer, name='output')(output)
