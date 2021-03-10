@@ -128,11 +128,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-traininglog.csv
+# Folders
 analysis/plots
-*.tfrecords
 
-# latex
+# LaTeX
 *.aux
 *.fdb_latexmk
 *.fls
@@ -144,4 +143,7 @@ analysis/plots
 test_*.sh
 run_*.sh
 
+
+# CSV and txt files
+traininglog.csv
 test.txt
