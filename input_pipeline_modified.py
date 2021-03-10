@@ -6,7 +6,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import tensorflow_datasets as tfds
 
-"Adapted from the tensorflow/models/official/nlp/bert/input_pipeline.py Github"
+"""Adapted from the tensorflow/models/official/nlp/bert/input_pipeline.py Github"""
 
 def decode_record(record, name_to_features):
   """Decodes a record to a TensorFlow example."""
